@@ -1,0 +1,144 @@
+import pandas as pd
+import plotly.express as px
+import re
+import os
+
+# Load the CSV file with special handling for multi-line cells
+file_path = 'time.csv'
+
+# Debug: Print current working directory and file existence
+print(f"Current working directory: {os.getcwd()}")
+print(f"File exists: {os.path.exists(file_path)}")
+print(f"Absolute file path: {os.path.abspath(file_path)}")
+
+# Use absolute path to ensure we're reading the right file
+script_dir = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.join(script_dir, 'time.csv')
+print(f"Using file path: {file_path}")
+
+# Read the file as text first to handle multi-line cells
+try:
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    print(f"Successfully read file, content length: {len(content)} characters")
+except FileNotFoundError:
+    print(f"Error: Could not find file at {file_path}")
+    print("Files in directory:")
+    for file in os.listdir(script_dir):
+        print(f"  - {file}")
+    exit(1)
+
+# Parse the content manually to handle multi-line cells
+import re
+
+# Split content into operation blocks using regex
+operation_blocks = re.split(r'\n"([^"]+)","', content)
+
+parsed_data = []
+
+# Skip the header (first block)
+for i in range(1, len(operation_blocks), 2):
+    if i + 1 < len(operation_blocks):
+        operation_name = operation_blocks[i].strip()
+        data_block = operation_blocks[i + 1]
+        
+        # Split the data block by columns (separated by "," followed by newline and "SM:")
+        columns = re.split(r'","\s*', data_block)
+        
+        # The Period (ns/op) should be the second column (index 1)
+        # The Margin of Error (ns) should be the third column (index 2)
+        if len(columns) >= 3:
+            period_column = columns[1]
+            margin_column = columns[2]
+            
+            # Extract SM and ST period values
+            sm_period_matches = re.findall(r'SM:\s*([\d.]+|N/A)', period_column)
+            st_period_matches = re.findall(r'ST:\s*([\d.]+|N/A)', period_column)
+            
+            # Extract SM and ST margin of error values
+            sm_margin_matches = re.findall(r'SM:\s*([\d.]+|N/A)', margin_column)
+            st_margin_matches = re.findall(r'ST:\s*([\d.]+|N/A)', margin_column)
+            
+            if (sm_period_matches and st_period_matches and 
+                sm_margin_matches and st_margin_matches):
+                
+                sm_period_str = sm_period_matches[0]
+                st_period_str = st_period_matches[0]
+                sm_margin_str = sm_margin_matches[0]
+                st_margin_str = st_margin_matches[0]
+                
+                # Handle N/A values
+                sm_period = float(sm_period_str) if sm_period_str != 'N/A' else 0
+                st_period = float(st_period_str) if st_period_str != 'N/A' else 0
+                sm_margin = float(sm_margin_str) if sm_margin_str != 'N/A' else 0
+                st_margin = float(st_margin_str) if st_margin_str != 'N/A' else 0
+                
+                parsed_data.append({
+                    'Operation': operation_name,
+                    'SM_Period': sm_period,
+                    'ST_Period': st_period,
+                    'SM_Margin': sm_margin,
+                    'ST_Margin': st_margin
+                })
+                print(f"Parsed: {operation_name}")
+                print(f"  SM - Period: {sm_period:,.0f} ns, Margin: {sm_margin:.6f} ns")
+                print(f"  ST - Period: {st_period:,.0f} ns, Margin: {st_margin:.6f} ns")
+
+print(f"\nTotal operations parsed: {len(parsed_data)}")
+
+# Create DataFrame from parsed data
+df = pd.DataFrame(parsed_data)
+print(f"Parsed {len(df)} operations:")
+for i, row in df.iterrows():
+    print(f"  {i+1}. {row['Operation']}")
+
+# Create a DataFrame for plotting by reshaping the data
+plot_data = []
+for _, row in df.iterrows():
+    plot_data.append({
+        'Operation': row['Operation'], 
+        'Period (ns/op)': row['SM_Period'], 
+        'Type': 'SM',
+        'Error': row['SM_Margin']
+    })
+    plot_data.append({
+        'Operation': row['Operation'], 
+        'Period (ns/op)': row['ST_Period'], 
+        'Type': 'ST',
+        'Error': row['ST_Margin']
+    })
+
+plot_df = pd.DataFrame(plot_data)
+print(f"Plot data has {len(plot_df)} rows")
+
+# Generate the grouped bar chart with error bars
+fig = px.bar(plot_df, x='Operation', y='Period (ns/op)', color='Type', barmode='group',
+             title='Comparison of SM and ST Period (ns/op) by Operation with Error Bars',
+             log_y=True,  # Use log scale due to large range of values
+             error_y='Error')  # Add error bars
+
+# Update layout for better appearance and fix cutoff issues
+fig.update_layout(
+    xaxis_title="Operation",
+    yaxis_title="Period (nanoseconds per operation)",
+    legend_title="Type",
+    width=1400,  # Increased width
+    height=800,  # Increased height
+    margin=dict(l=80, r=80, t=100, b=150),  # Increased margins
+    xaxis=dict(
+        tickangle=45,  # Rotate x-axis labels to prevent overlap
+        tickmode='linear',  # Show all ticks
+        title_standoff=25
+    ),
+    yaxis=dict(
+        title_standoff=25
+    ),
+    font=dict(size=12)  # Increase font size
+)
+
+# Save the chart as image and JSON locally
+fig.write_image('period_with_error_bars.png', width=1400, height=800, scale=2)
+
+
+# Optionally display the chart (if running in an environment that supports it)
+# fig.show()

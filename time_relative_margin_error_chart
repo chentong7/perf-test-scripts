@@ -1,0 +1,134 @@
+import pandas as pd
+import plotly.express as px
+import re
+import os
+
+# Load the CSV file with special handling for multi-line cells
+file_path = 'time.csv'
+
+# Debug: Print current working directory and file existence
+print(f"Current working directory: {os.getcwd()}")
+print(f"File exists: {os.path.exists(file_path)}")
+print(f"Absolute file path: {os.path.abspath(file_path)}")
+
+# Use absolute path to ensure we're reading the right file
+script_dir = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.join(script_dir, 'time.csv')
+print(f"Using file path: {file_path}")
+
+# Read the file as text first to handle multi-line cells
+try:
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    print(f"Successfully read file, content length: {len(content)} characters")
+except FileNotFoundError:
+    print(f"Error: Could not find file at {file_path}")
+    print("Files in directory:")
+    for file in os.listdir(script_dir):
+        print(f"  - {file}")
+    exit(1)
+
+# Parse the content manually to handle multi-line cells
+import re
+
+# Split content into operation blocks using regex
+operation_blocks = re.split(r'\n"([^"]+)","', content)
+
+parsed_data = []
+
+# Skip the header (first block)
+for i in range(1, len(operation_blocks), 2):
+    if i + 1 < len(operation_blocks):
+        operation_name = operation_blocks[i].strip()
+        data_block = operation_blocks[i + 1]
+        
+        # Split the data block by columns (separated by "," followed by newline and "SM:")
+        columns = re.split(r'","\s*', data_block)
+        
+        # The Relative Margin of Error should be the fourth column (index 3)
+        if len(columns) >= 4:
+            relative_margin_column = columns[3]
+            
+            # Extract SM and ST relative margin of error values
+            sm_matches = re.findall(r'SM:\s*([\d.]+|N/A)', relative_margin_column)
+            st_matches = re.findall(r'ST:\s*([\d.]+|N/A)', relative_margin_column)
+            
+            if sm_matches and st_matches:
+                sm_relative_margin_str = sm_matches[0]
+                st_relative_margin_str = st_matches[0]
+                
+                # Handle N/A values
+                sm_relative_margin = float(sm_relative_margin_str) if sm_relative_margin_str != 'N/A' else 0
+                st_relative_margin = float(st_relative_margin_str) if st_relative_margin_str != 'N/A' else 0
+                
+                parsed_data.append({
+                    'Operation': operation_name,
+                    'SM_Relative_Margin': sm_relative_margin,
+                    'ST_Relative_Margin': st_relative_margin
+                })
+                print(f"Parsed: {operation_name}")
+                print(f"  SM - Relative Margin: {sm_relative_margin:.2f}%")
+                print(f"  ST - Relative Margin: {st_relative_margin:.2f}%")
+
+print(f"\nTotal operations parsed: {len(parsed_data)}")
+
+# Create DataFrame from parsed data
+df = pd.DataFrame(parsed_data)
+print(f"Parsed {len(df)} operations:")
+for i, row in df.iterrows():
+    print(f"  {i+1}. {row['Operation']}")
+
+# Create a DataFrame for plotting by reshaping the data
+plot_data = []
+for _, row in df.iterrows():
+    plot_data.append({
+        'Operation': row['Operation'], 
+        'Relative Margin of Error (%)': row['SM_Relative_Margin'], 
+        'Type': 'SM'
+    })
+    plot_data.append({
+        'Operation': row['Operation'], 
+        'Relative Margin of Error (%)': row['ST_Relative_Margin'], 
+        'Type': 'ST'
+    })
+
+plot_df = pd.DataFrame(plot_data)
+print(f"Plot data has {len(plot_df)} rows")
+
+# Generate the grouped bar chart
+fig = px.bar(plot_df, x='Operation', y='Relative Margin of Error (%)', color='Type', barmode='group',
+             title='Comparison of SM and ST Relative Margin of Error by Operation')
+
+# Update layout for better appearance and fix cutoff issues
+fig.update_layout(
+    xaxis_title="Operation",
+    yaxis_title="Relative Margin of Error (%)",
+    legend_title="Type",
+    width=1400,  # Increased width
+    height=800,  # Increased height
+    margin=dict(l=80, r=80, t=100, b=150),  # Increased margins
+    xaxis=dict(
+        tickangle=45,  # Rotate x-axis labels to prevent overlap
+        tickmode='linear',  # Show all ticks
+        title_standoff=25
+    ),
+    yaxis=dict(
+        title_standoff=25,
+        # Add zero line
+        zeroline=True,
+        zerolinecolor='rgba(0,0,0,0.5)',
+        zerolinewidth=1
+    ),
+    font=dict(size=12)  # Increase font size
+)
+
+# Add horizontal line at 5% as a reference for "acceptable" error
+fig.add_hline(y=5, line_dash="dash", line_color="red", 
+              annotation_text="5% Reference Line", 
+              annotation_position="bottom right")
+
+# Save the chart as image and JSON locally
+fig.write_image('relative_margin_error_comparison.png', width=1400, height=800, scale=2)
+
+# Optionally display the chart (if running in an environment that supports it)
+# fig.show()

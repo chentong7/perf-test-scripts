@@ -1,0 +1,147 @@
+import pandas as pd
+import plotly.express as px
+import re
+import os
+
+# Load the CSV file with special handling for multi-line cells
+file_path = 'memory.csv'
+
+# Debug: Print current working directory and file existence
+print(f"Current working directory: {os.getcwd()}")
+print(f"File exists: {os.path.exists(file_path)}")
+print(f"Absolute file path: {os.path.abspath(file_path)}")
+
+# Use absolute path to ensure we're reading the right file
+script_dir = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.join(script_dir, 'memory.csv')
+print(f"Using file path: {file_path}")
+
+# Read the file as text first to handle multi-line cells
+try:
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    print(f"Successfully read file, content length: {len(content)} characters")
+except FileNotFoundError:
+    print(f"Error: Could not find file at {file_path}")
+    print("Files in directory:")
+    for file in os.listdir(script_dir):
+        print(f"  - {file}")
+    exit(1)
+
+# Parse the content manually to handle multi-line cells
+import re
+
+# Split content into operation blocks using regex
+operation_blocks = re.split(r'\n"([^"]+)","', content)
+
+parsed_data = []
+
+# Skip the header (first block)
+for i in range(1, len(operation_blocks), 2):
+    if i + 1 < len(operation_blocks):
+        operation_name = operation_blocks[i].strip()
+        data_block = operation_blocks[i + 1]
+        
+        # Split the data block by columns (separated by "," followed by newline and "SM:")
+        columns = re.split(r'","\s*', data_block)
+        
+        # The Heap Used Avg should be the second column (index 1)
+        # The Margin of Error should be the fourth column (index 3)
+        if len(columns) >= 4:
+            heap_column = columns[1]
+            margin_column = columns[3]
+            
+            # Extract SM and ST heap usage values
+            sm_heap_matches = re.findall(r'SM:\s*([-\d.]+|N/A)', heap_column)
+            st_heap_matches = re.findall(r'ST:\s*([-\d.]+|N/A)', heap_column)
+            
+            # Extract SM and ST margin of error values
+            sm_margin_matches = re.findall(r'SM:\s*([-\d.]+|N/A)', margin_column)
+            st_margin_matches = re.findall(r'ST:\s*([-\d.]+|N/A)', margin_column)
+            
+            if (sm_heap_matches and st_heap_matches and 
+                sm_margin_matches and st_margin_matches):
+                
+                sm_heap_str = sm_heap_matches[0]
+                st_heap_str = st_heap_matches[0]
+                sm_margin_str = sm_margin_matches[0]
+                st_margin_str = st_margin_matches[0]
+                
+                # Handle N/A values
+                sm_heap = float(sm_heap_str) if sm_heap_str != 'N/A' else 0
+                st_heap = float(st_heap_str) if st_heap_str != 'N/A' else 0
+                sm_margin = float(sm_margin_str) if sm_margin_str != 'N/A' else 0
+                st_margin = float(st_margin_str) if st_margin_str != 'N/A' else 0
+                
+                parsed_data.append({
+                    'Operation': operation_name,
+                    'SM_Heap': sm_heap,
+                    'ST_Heap': st_heap,
+                    'SM_Margin': sm_margin,
+                    'ST_Margin': st_margin
+                })
+                print(f"Parsed: {operation_name}")
+                print(f"  SM - Heap: {sm_heap:,.1f} bytes, Margin: {sm_margin:.1f}")
+                print(f"  ST - Heap: {st_heap:,.1f} bytes, Margin: {st_margin:.1f}")
+
+print(f"\nTotal operations parsed: {len(parsed_data)}")
+
+# Create DataFrame from parsed data
+df = pd.DataFrame(parsed_data)
+print(f"Parsed {len(df)} operations:")
+for i, row in df.iterrows():
+    print(f"  {i+1}. {row['Operation']}")
+
+# Create a DataFrame for plotting by reshaping the data
+plot_data = []
+for _, row in df.iterrows():
+    plot_data.append({
+        'Operation': row['Operation'], 
+        'Heap Used Avg (bytes)': row['SM_Heap'], 
+        'Type': 'SM',
+        'Error': abs(row['SM_Margin'])  # Use absolute value for error bars
+    })
+    plot_data.append({
+        'Operation': row['Operation'], 
+        'Heap Used Avg (bytes)': row['ST_Heap'], 
+        'Type': 'ST',
+        'Error': abs(row['ST_Margin'])  # Use absolute value for error bars
+    })
+
+plot_df = pd.DataFrame(plot_data)
+print(f"Plot data has {len(plot_df)} rows")
+
+# Generate the grouped bar chart with error bars
+fig = px.bar(plot_df, x='Operation', y='Heap Used Avg (bytes)', color='Type', barmode='group',
+             title='Comparison of SM and ST Heap Memory Usage by Operation with Error Bars',
+             error_y='Error')  # Add error bars
+
+# Update layout for better appearance and fix cutoff issues
+fig.update_layout(
+    xaxis_title="Operation",
+    yaxis_title="Heap Used Average (bytes)",
+    legend_title="Type",
+    width=1400,  # Increased width
+    height=800,  # Increased height
+    margin=dict(l=80, r=80, t=100, b=150),  # Increased margins
+    xaxis=dict(
+        tickangle=45,  # Rotate x-axis labels to prevent overlap
+        tickmode='linear',  # Show all ticks
+        title_standoff=25
+    ),
+    yaxis=dict(
+        title_standoff=25,
+        # Add zero line for better visualization since some values are negative
+        zeroline=True,
+        zerolinecolor='rgba(0,0,0,0.5)',
+        zerolinewidth=1
+    ),
+    font=dict(size=12)  # Increase font size
+)
+
+# Save the chart as image and JSON locally
+fig.write_image('memory_heap_with_error_bars.png', width=1400, height=800, scale=2)
+
+
+# Optionally display the chart (if running in an environment that supports it)
+# fig.show()

@@ -1,0 +1,126 @@
+import pandas as pd
+import plotly.express as px
+import re
+import os
+import numpy as np
+
+# Load the CSV file with special handling for multi-line cells
+file_path = 'memory.csv'
+
+# Use absolute path to ensure we're reading the right file
+script_dir = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.join(script_dir, 'memory.csv')
+
+# Read and parse the file (same parsing logic as before)
+with open(file_path, 'r', encoding='utf-8') as f:
+    content = f.read()
+
+operation_blocks = re.split(r'\n"([^"]+)","', content)
+parsed_data = []
+
+for i in range(1, len(operation_blocks), 2):
+    if i + 1 < len(operation_blocks):
+        operation_name = operation_blocks[i].strip()
+        data_block = operation_blocks[i + 1]
+        columns = re.split(r'","\s*', data_block)
+        
+        if len(columns) >= 4:
+            heap_column = columns[1]
+            margin_column = columns[3]
+            
+            sm_heap_matches = re.findall(r'SM:\s*([-\d.]+|N/A)', heap_column)
+            st_heap_matches = re.findall(r'ST:\s*([-\d.]+|N/A)', heap_column)
+            sm_margin_matches = re.findall(r'SM:\s*([-\d.]+|N/A)', margin_column)
+            st_margin_matches = re.findall(r'ST:\s*([-\d.]+|N/A)', margin_column)
+            
+            if (sm_heap_matches and st_heap_matches and 
+                sm_margin_matches and st_margin_matches):
+                
+                sm_heap = float(sm_heap_matches[0]) if sm_heap_matches[0] != 'N/A' else 0
+                st_heap = float(st_heap_matches[0]) if st_heap_matches[0] != 'N/A' else 0
+                sm_margin = float(sm_margin_matches[0]) if sm_margin_matches[0] != 'N/A' else 0
+                st_margin = float(st_margin_matches[0]) if st_margin_matches[0] != 'N/A' else 0
+                
+                parsed_data.append({
+                    'Operation': operation_name,
+                    'SM_Heap': sm_heap,
+                    'ST_Heap': st_heap,
+                    'SM_Margin': sm_margin,
+                    'ST_Margin': st_margin
+                })
+
+df = pd.DataFrame(parsed_data)
+
+# Create plot data
+plot_data = []
+for _, row in df.iterrows():
+    plot_data.append({
+        'Operation': row['Operation'], 
+        'Heap Used Avg (bytes)': row['SM_Heap'], 
+        'Type': 'SM',
+        'Error': abs(row['SM_Margin'])
+    })
+    plot_data.append({
+        'Operation': row['Operation'], 
+        'Heap Used Avg (bytes)': row['ST_Heap'], 
+        'Type': 'ST',
+        'Error': abs(row['ST_Margin'])
+    })
+
+plot_df = pd.DataFrame(plot_data)
+
+# Split data into small and large values for better visualization
+threshold = 50000  # 50k bytes
+
+# Get operations that have ANY large values (SM or ST)
+operations_with_large = set()
+operations_with_small = set()
+
+for _, row in plot_df.iterrows():
+    if abs(row['Heap Used Avg (bytes)']) > threshold:
+        operations_with_large.add(row['Operation'])
+    else:
+        operations_with_small.add(row['Operation'])
+
+# Create datasets - show ALL data for each operation, but group by scale
+small_scale_ops = plot_df[plot_df['Operation'].isin(operations_with_small - operations_with_large)]
+large_scale_ops = plot_df[plot_df['Operation'].isin(operations_with_large)]
+
+print(f"Operations with only small values (±{threshold:,} bytes): {len(operations_with_small - operations_with_large)} operations")
+print(f"Operations with large values (>{threshold:,} bytes): {len(operations_with_large)} operations")
+print(f"Small scale operations: {list(operations_with_small - operations_with_large)}")
+print(f"Large scale operations: {list(operations_with_large)}")
+
+# Create chart for small-scale operations (showing both SM and ST for each operation)
+if len(small_scale_ops) > 0:
+    fig_small = px.bar(small_scale_ops, x='Operation', y='Heap Used Avg (bytes)', 
+                       color='Type', barmode='group',
+                       title=f'Memory Usage - Small Scale Operations (max ±{threshold:,} bytes) with Error Bars',
+                       error_y='Error')
+    
+    fig_small.update_layout(
+        width=1400, height=600,
+        margin=dict(l=80, r=80, t=100, b=150),
+        xaxis=dict(tickangle=45, title_standoff=25),
+        yaxis=dict(title_standoff=25, zeroline=True, zerolinecolor='rgba(0,0,0,0.5)'),
+        font=dict(size=12)
+    )
+
+    fig_small.write_image('memory_small_scale_operations.png', width=1400, height=800, scale=2)
+
+# Create chart for large-scale operations (showing both SM and ST for each operation)
+if len(large_scale_ops) > 0:
+    fig_large = px.bar(large_scale_ops, x='Operation', y='Heap Used Avg (bytes)', 
+                       color='Type', barmode='group',
+                       title=f'Memory Usage - Large Scale Operations (with values >{threshold:,} bytes) with Error Bars',
+                       error_y='Error')
+    
+    fig_large.update_layout(
+        width=1400, height=600,
+        margin=dict(l=80, r=80, t=100, b=150),
+        xaxis=dict(tickangle=45, title_standoff=25),
+        yaxis=dict(title_standoff=25, zeroline=True, zerolinecolor='rgba(0,0,0,0.5)'),
+        font=dict(size=12)
+    )
+    
+    fig_large.write_image('memory_large_scale_operations.png', width=1400, height=800, scale=2)
