@@ -4,7 +4,7 @@ import re
 import os
 
 # Load the CSV file with special handling for multi-line cells
-file_path = 'memory.csv'
+file_path = 'enhanced_memory.csv'
 
 # Debug: Print current working directory and file existence
 print(f"Current working directory: {os.getcwd()}")
@@ -13,7 +13,7 @@ print(f"Absolute file path: {os.path.abspath(file_path)}")
 
 # Use absolute path to ensure we're reading the right file
 script_dir = os.path.dirname(os.path.abspath(__file__))
-file_path = os.path.join(script_dir, 'memory.csv')
+file_path = os.path.join(script_dir, 'enhanced_memory.csv')
 print(f"Using file path: {file_path}")
 
 # Read the file as text first to handle multi-line cells
